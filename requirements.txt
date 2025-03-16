@@ -1,12 +1,33 @@
-streamlit>=1.22
-pandas
-numpy
-seaborn
-matplotlib
-torch
-plotly
-openai
-transformers
-Pillow
-shap
-fairlearn
+
+# Base requirements
+numpy==1.26.4
+pandas==2.2.3
+matplotlib==3.8.3
+seaborn==0.13.2
+scikit-learn==1.4.1.post1
+scipy==1.12.0
+
+# Deep Learning & Model Dependencies
+torch==2.2.0  # or latest stable version
+torchvision==0.17.0
+torchaudio==2.2.0
+transformers==4.38.2  # latest stable version
+sentencepiece==0.2.0  # Fixes tokenizer loading issue
+
+# Fairness & Bias Analysis
+shap==0.45.0  # Explanation library
+fairlearn==0.11.0  # Bias detection & mitigation
+
+# NLP Tools
+openai==1.8.0
+huggingface-hub==0.21.0
+
+# Deployment & UI
+streamlit==1.31.0
+plotly==5.19.0
+Pillow==10.2.0
+
+# Other Dependencies
+altair==5.2.0
+tqdm==4.66.0
+urllib3==2.2.0
