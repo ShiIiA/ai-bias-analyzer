@@ -189,6 +189,6 @@ st.subheader(bias_alert)
 # --- Clear Cache Button ---
 if st.button("🧹 Clear Cache & Restart"):
     st.cache_data.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 st.button("🔄 Refresh Metrics", on_click=st.experimental_rerun)
