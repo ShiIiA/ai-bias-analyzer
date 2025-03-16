@@ -8,147 +8,86 @@ Original file is located at
 """
 
 import streamlit as st
-import pandas as pd
 import numpy as np
 import plotly.express as px
 import openai
-import torch
 import shap
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from fairlearn.reductions import ExponentiatedGradient, DemographicParity
+from fairlearn.metrics import demographic_parity_difference
+from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# === AI & NLP Imports ===
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
-from PIL import Image
-
-# === Fairness and Bias Analysis ===
-from fairlearn.reductions import ExponentiatedGradient, DemographicParity
-from fairlearn.metrics import demographic_parity_difference, equalized_odds_difference
-
-# === CONFIGURATION ===
+# === SETUP CONFIGURATION ===
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
-# === FIX DEBERTA TOKENIZER ===
-try:
-    tokenizer = AutoTokenizer.from_pretrained(
-        "microsoft/deberta-v3-base",
-        use_fast=False,  # Ensure slow tokenizer is used
-        trust_remote_code=True
-    )
-except ValueError:
-    st.error("Error loading DeBERTa tokenizer. Ensure `sentencepiece` is installed.")
+# === LOAD MODEL & TOKENIZER ===
+MODEL_NAME = "microsoft/deberta-v3-base"
 
-model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v3-base")
+try:
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+except Exception as e:
+    st.error(f"⚠️ Error loading AI model: {e}")
+    st.stop()
 
 # === SHAP EXPLAINER FIX: USING A TEXT MASKER ===
-masker = shap.maskers.Text(tokenizer)
-explainer = shap.Explainer(model, masker=masker)
+try:
+    masker = shap.maskers.Text(tokenizer)
+    explainer = shap.Explainer(model, masker=masker)
+except Exception as e:
+    st.error(f"⚠️ Error initializing SHAP explainer: {e}")
+    st.stop()
 
 # === LOAD DATA ===
-@st.cache_data
-def load_data():
-    return pd.read_csv("sample_data.csv")  # Ensure dataset is available
-
-df = load_data()
-
-# === UI DESIGN ===
-st.title("🔍 AI Bias Analyzer - Snakelets Team 🐍")
-st.markdown("""
-**Analyze model bias, fairness, and interpretability.**
-""")
-
-# === DATA UPLOAD ===
-st.sidebar.header("Upload Dataset")
-uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
+uploaded_file = st.file_uploader("Upload a dataset", type=["csv"])
 
 if uploaded_file:
+    import pandas as pd
+
     df = pd.read_csv(uploaded_file)
-    st.success("✅ File uploaded successfully!")
+    st.write("📊 Dataset Preview:", df.head())
 
-# === MODEL PREDICTION ===
-st.header("📊 Model Prediction Analysis")
-selected_feature = st.selectbox("Choose feature to analyze", df.columns)
+    # Select columns
+    target_col = st.selectbox("Select target column", df.columns)
+    feature_cols = st.multiselect("Select feature columns", df.columns, default=df.columns.tolist())
 
-if st.button("Run Model"):
-    st.write("Generating Predictions...")
+    # === BIAS ANALYSIS ===
+    with st.expander("⚖️ Bias Analysis"):
+        sensitive_attr = st.selectbox("Select sensitive attribute", df.columns)
+        parity_diff = demographic_parity_difference(df[target_col], sensitive_features=df[sensitive_attr])
+        st.write(f"📉 Demographic Parity Difference: {parity_diff:.4f}")
 
-    # Tokenization
-    inputs = tokenizer(df[selected_feature].astype(str).tolist(), truncation=True, padding=True, return_tensors="pt")
-    with torch.no_grad():
-        outputs = model(**inputs)
+    # === MODEL PREDICTIONS ===
+    if st.button("Run Predictions"):
+        inputs = tokenizer(df[feature_cols].astype(str).values.tolist(), padding=True, truncation=True, return_tensors="pt")
+        with torch.no_grad():
+            predictions = model(**inputs).logits.argmax(dim=-1).numpy()
+        df["Prediction"] = predictions
+        st.write("✅ Predictions Completed!")
 
-    predictions = torch.softmax(outputs.logits, dim=1).numpy()
-    df["Prediction"] = predictions[:, 1]  # Assuming binary classification
+        # Explain Predictions
+        with st.expander("🔍 SHAP Explanations"):
+            shap_values = explainer(df[feature_cols].astype(str).values.tolist())
+            st.pyplot(shap.plots.text(shap_values))
 
-    st.dataframe(df)
+    # === BIAS MITIGATION METHODS ===
+    with st.expander("⚖️ Bias Reduction Methods"):
+        st.write("Explore bias reduction techniques:")
+        st.markdown("- **Pre-processing**: Data balancing, re-weighting sensitive attributes")
+        st.markdown("- **In-processing**: Adversarial debiasing, fairness constraints")
+        st.markdown("- **Post-processing**: Calibration, fairness-aware thresholding")
 
-# === EXPLAINABILITY & SHAP ANALYSIS ===
-st.header("🧐 Understanding Model Decisions")
+        selected_method = st.selectbox("Select a bias mitigation method", ["None", "Reweighting", "Adversarial Training"])
+        if selected_method != "None":
+            st.write(f"Applying {selected_method}... 🚀")
+            # Implement methods here...
 
-if st.button("Run SHAP Analysis"):
-    st.write("Computing SHAP values...")
+# === UX DESIGN EXPLANATION ===
+with st.expander("🎨 UX Design & Model Transparency"):
+    st.write("This application follows transparency principles by providing clear explanations for model predictions.")
+    st.image("ux_design.png", caption="UX Flowchart", use_column_width=True)
 
-    shap_values = explainer(df[selected_feature].astype(str).tolist())
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    shap.summary_plot(shap_values, df[selected_feature], plot_type="bar", show=False)
-    st.pyplot(fig)
-
-# === BIAS ANALYSIS ===
-st.header("⚖️ Bias Analysis")
-
-# Select sensitive attribute
-sensitive_feature = st.selectbox("Select a sensitive attribute", df.columns)
-
-# Compute bias metrics
-dp_diff = demographic_parity_difference(df["Prediction"], df[sensitive_feature])
-eo_diff = equalized_odds_difference(df["Prediction"], df[sensitive_feature])
-
-st.write(f"**Demographic Parity Difference:** {dp_diff:.4f}")
-st.write(f"**Equalized Odds Difference:** {eo_diff:.4f}")
-
-# === VISUALIZING BIAS ===
-fig = px.histogram(df, x="Prediction", color=sensitive_feature, title="Prediction Distribution by Sensitive Attribute")
-st.plotly_chart(fig)
-
-# === BIAS REDUCTION METHODS ===
-st.header("🛠 Bias Mitigation Strategies")
-
-bias_reduction_method = st.selectbox("Choose bias mitigation method", ["None", "Reweighting", "Exponentiated Gradient"])
-
-if bias_reduction_method == "Reweighting":
-    st.write("🔹 **Reweighting Strategy**: Adjusts sample weights to balance fairness trade-offs.")
-    # Implement weight adjustment
-elif bias_reduction_method == "Exponentiated Gradient":
-    st.write("🔹 **Exponentiated Gradient**: Constrains model to satisfy fairness constraints.")
-    mitigator = ExponentiatedGradient(model, constraints=DemographicParity())
-    mitigator.fit(df[selected_feature], df["Prediction"])
-    df["Mitigated Prediction"] = mitigator.predict(df[selected_feature])
-    st.dataframe(df[["Prediction", "Mitigated Prediction"]])
-
-# === UX DESIGN & EXPLANATIONS ===
-st.header("🎨 UX Design Considerations")
-st.markdown("""
-- **Clarity**: Results are visualized using plots for better interpretation.
-- **Interactivity**: Users can explore different bias mitigation methods.
-- **Transparency**: SHAP analysis helps users understand how models make decisions.
-""")
-
-st.header("🤖 AI Agent Explanation")
-if st.button("Ask AI for Explanation"):
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are an AI assistant helping analyze bias in AI models."},
-            {"role": "user", "content": f"Explain the bias analysis results: DP={dp_diff:.4f}, EO={eo_diff:.4f}"}
-        ]
-    )
-    st.write(response["choices"][0]["message"]["content"])
-
-st.success("🎉 Analysis Complete!")
-
-# === FOOTER ===
-st.markdown(
-    "<br><hr><p style='text-align:center;'>🐍 Snakelets | AI Bias Analyzer | Made with ❤️</p>",
-    unsafe_allow_html=True
-)
+st.success("🎉 AI Bias Analyzer Ready!")
