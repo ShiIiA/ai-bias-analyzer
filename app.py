@@ -26,44 +26,60 @@ st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
 # === LOAD PRETRAINED MODEL ===
 MODEL_NAME = "microsoft/deberta-v3-base"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+
+try:
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+except Exception as e:
+    st.error(f"🚨 Error loading AI model: {e}")
 
 # === SHAP EXPLAINER SETUP ===
-masker = shap.maskers.Text(tokenizer)
-explainer = shap.Explainer(model, masker=masker)
+try:
+    masker = shap.maskers.Text(tokenizer)
+    explainer = shap.Explainer(model, masker=masker)
+except Exception as e:
+    st.warning(f"⚠️ SHAP explainer initialization error: {e}")
 
 # === LOAD DATA ===
-uploaded_file = st.file_uploader("Upload a dataset", type=["csv"])
+uploaded_file = st.file_uploader("📂 Upload a dataset (CSV)", type=["csv"])
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    st.write("📊 Preview of your dataset:")
-    st.dataframe(df.head())
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.write("📊 **Preview of dataset:**")
+        st.dataframe(df.head())
+    except Exception as e:
+        st.error(f"🚨 Error loading file: {e}")
 
 # === MODEL BIAS ANALYSIS ===
 st.header("🔍 Bias Analysis")
-target_column = st.selectbox("Select target variable:", df.columns if uploaded_file else [])
 
-if uploaded_file and target_column:
-    # Compute Fairness Metrics
-    sensitive_attr = st.selectbox("Select sensitive attribute:", df.columns)
+if uploaded_file:
+    target_column = st.selectbox("🎯 Select target variable:", df.columns)
+    sensitive_attr = st.selectbox("🛑 Select sensitive attribute:", df.columns)
 
-    demographic_parity = demographic_parity_difference(
-        df[target_column], df[sensitive_attr]
-    )
+    if target_column and sensitive_attr:
+        try:
+            demographic_parity = demographic_parity_difference(
+                y_true=df[target_column],
+                y_pred=df[target_column],  # Adjust as per model predictions
+                sensitive_features=df[sensitive_attr]
+            )
+            st.write(f"📢 **Demographic Parity Difference:** {demographic_parity:.4f}")
+        except Exception as e:
+            st.error(f"🚨 Error computing fairness metric: {e}")
 
-    st.write(f"📢 **Demographic Parity Difference:** {demographic_parity:.4f}")
-
-    # SHAP Interpretation
-    st.subheader("Explainability using SHAP")
-    sample_text = st.text_area("Enter a sample text for analysis:")
+    # === SHAP Interpretation ===
+    st.subheader("🔍 Explainability using SHAP")
+    sample_text = st.text_area("📝 Enter a sample text for analysis:")
 
     if sample_text:
-        tokens = tokenizer(sample_text, return_tensors="pt")
-        shap_values = explainer(tokens)
-
-        st.write("📊 SHAP Explanation for Prediction:")
-        shap.plots.text(shap_values)
+        try:
+            tokens = tokenizer(sample_text, return_tensors="pt")
+            shap_values = explainer(tokens)
+            st.write("📊 **SHAP Explanation for Prediction:**")
+            shap.plots.text(shap_values)
+        except Exception as e:
+            st.error(f"🚨 Error generating SHAP values: {e}")
 
 # === BIAS REDUCTION METHODS ===
 st.header("⚖️ Bias Reduction Techniques")
@@ -74,7 +90,7 @@ bias_methods = {
     "Post-Processing": "Modify predictions to achieve fairness.",
 }
 
-selected_method = st.selectbox("Choose a bias reduction technique:", list(bias_methods.keys()))
+selected_method = st.selectbox("📌 Choose a bias reduction technique:", list(bias_methods.keys()))
 
 st.write(f"💡 **Explanation:** {bias_methods[selected_method]}")
 
@@ -83,9 +99,9 @@ st.header("🎨 UX Design & Model Transparency")
 
 st.write(
     """
-    - **Transparency**: This app highlights fairness metrics and model explanations.
+    - **Transparency**: The app provides fairness metrics and explanations.
     - **User Control**: Select bias reduction techniques and interpret model outputs.
-    - **Visualizations**: Graphs and text-based explanations aid decision-making.
+    - **Visualizations**: Charts and SHAP plots help with decision-making.
     """
 )
 
