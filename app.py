@@ -14,169 +14,138 @@ import plotly.express as px
 import openai
 import shap
 import torch
-from transformers import pipeline
-from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+# === AI & NLP Imports ===
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+from PIL import Image
+
+# === Fairness and Bias Analysis ===
 from fairlearn.reductions import ExponentiatedGradient, DemographicParity
-from fairlearn.metrics import demographic_parity_difference
-from transformers import AutoTokenizer
-from transformers import AutoModelForSequenceClassification
-
-model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v3-base", ignore_mismatched_sizes=True)
-
-tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v3-base", use_fast=False)
-
+from fairlearn.metrics import demographic_parity_difference, equalized_odds_difference
 
 # === SETUP CONFIGURATION ===
-st.set_page_config(
-    page_title="🐍 Snakelets - AI Bias Analyzer",
-    page_icon="🐍",
-    layout="wide"
-)
+st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
-# === DEFINE COLORS & BRANDING ===
-PRIMARY_COLOR = "#2E86C1"
-SECONDARY_COLOR = "#F39C12"
-HIGHLIGHT_COLOR = "#32aece"
-
-# === HEADER ===
+# === FIX DEBERTA TOKENIZER ===
 try:
-    st.image("snake_logo.png", width=120)
-except FileNotFoundError:
-    st.warning("⚠️ Logo image 'snake_logo.png' not found. Please ensure it is in the project directory.")
+    tokenizer = AutoTokenizer.from_pretrained(
+        "microsoft/deberta-v3-base",
+        use_fast=False,  # Enforce slow tokenizer to avoid conversion issue
+        trust_remote_code=True
+    )
+except ValueError:
+    st.error("Error loading DeBERTa tokenizer. Ensure `sentencepiece` is installed.")
 
-st.markdown(
-    f"<h1 style='color:{PRIMARY_COLOR}; text-align:center;'>🐍 Snakelets AI Bias Analyzer</h1>",
-    unsafe_allow_html=True
-)
-st.markdown(
-    "<p style='text-align:center;'>Using AI to detect, explain, and mitigate biases</p>",
-    unsafe_allow_html=True
-)
+model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v3-base")
 
-# === FILE UPLOAD ===
-st.subheader("📂 Upload a Dataset for Bias Analysis")
-uploaded_file = st.file_uploader("Upload your dataset (CSV format)", type=["csv"])
+# === LOAD EXPLANATION TOOL ===
+explainer = shap.Explainer(model)
+
+# === LOAD SAMPLE DATA ===
+@st.cache_data
+def load_data():
+    return pd.read_csv("sample_data.csv")  # Ensure the dataset is present
+
+df = load_data()
+
+# === UI DESIGN ===
+st.title("🔍 AI Bias Analyzer - Snakelets Team 🐍")
+st.markdown("""
+**Analyze model bias, fairness, and interpretability.**
+""")
+
+# === DATA UPLOAD ===
+st.sidebar.header("Upload Dataset")
+uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.write("### 📊 Data Preview:")
+    st.success("✅ File uploaded successfully!")
+
+# === MODEL PREDICTION ===
+st.header("📊 Model Prediction Analysis")
+selected_feature = st.selectbox("Choose feature to analyze", df.columns)
+
+if st.button("Run Model"):
+    st.write("Generating Predictions...")
+
+    # Tokenization
+    inputs = tokenizer(df[selected_feature].astype(str).tolist(), truncation=True, padding=True, return_tensors="pt")
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    predictions = torch.softmax(outputs.logits, dim=1).numpy()
+    df["Prediction"] = predictions[:, 1]  # Assuming binary classification
+
     st.dataframe(df)
 
-    # === AI Bias Detection Model (Microsoft/HuggingFace) ===
-    st.subheader("🤖 AI Bias Detection")
-    model_name = "microsoft/deberta-v3-base"
-    try:
-        bias_model = pipeline("text-classification", model=model_name, device=0 if torch.cuda.is_available() else -1)
-    except Exception as e:
-        st.error(f"⚠️ Error loading AI model: {e}")
+# === EXPLAINABILITY & SHAP ANALYSIS ===
+st.header("🧐 Understanding Model Decisions")
 
-    # === User Selection for Bias Analysis ===
-    target_column = st.selectbox("Select Target Column for Analysis:", df.columns)
+if st.button("Run SHAP Analysis"):
+    st.write("Computing SHAP values...")
 
-    if st.button("🔍 Analyze Bias"):
-        st.write("🚀 Running Bias Analysis...")
+    explainer = shap.Explainer(model, df[selected_feature])
+    shap_values = explainer(df[selected_feature])
 
-        # Compute model predictions
-        predictions = bias_model(df[target_column].astype(str).tolist())
+    fig, ax = plt.subplots(figsize=(10, 5))
+    shap.summary_plot(shap_values, df[selected_feature], plot_type="bar", show=False)
+    st.pyplot(fig)
 
-        # Convert predictions to DataFrame
-        results_df = pd.DataFrame(predictions)
-        results_df["Original Data"] = df[target_column].values
+# === BIAS ANALYSIS ===
+st.header("⚖️ Bias Analysis")
 
-        # Display results
-        st.write("### Bias Detection Results")
-        st.dataframe(results_df)
+# Select sensitive attribute
+sensitive_feature = st.selectbox("Select a sensitive attribute", df.columns)
 
-        # === Bias Visualization ===
-        st.subheader("📈 Bias Visualization")
+# Compute bias metrics
+dp_diff = demographic_parity_difference(df["Prediction"], df[sensitive_feature])
+eo_diff = equalized_odds_difference(df["Prediction"], df[sensitive_feature])
 
-        # Count occurrences of each label
-        label_counts = results_df["label"].value_counts()
-        fig = px.bar(label_counts, x=label_counts.index, y=label_counts.values, title="Bias Distribution")
-        st.plotly_chart(fig)
+st.write(f"**Demographic Parity Difference:** {dp_diff:.4f}")
+st.write(f"**Equalized Odds Difference:** {eo_diff:.4f}")
 
-        # === Explainability Using SHAP ===
-        st.subheader("🧐 Understanding Bias - SHAP Analysis")
+# === VISUALIZING BIAS ===
+fig = px.histogram(df, x="Prediction", color=sensitive_feature, title="Prediction Distribution by Sensitive Attribute")
+st.plotly_chart(fig)
 
-        explainer = shap.Explainer(lambda x: bias_model([str(i) for i in x]))
-        shap_values = explainer(df[target_column].astype(str))
+# === BIAS REDUCTION METHODS ===
+st.header("🛠 Bias Mitigation Strategies")
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values, df[target_column].astype(str), show=False)
-        st.pyplot(fig)
+bias_reduction_method = st.selectbox("Choose bias mitigation method", ["None", "Reweighting", "Exponentiated Gradient"])
 
-    # === Bias Reduction Techniques ===
-    st.subheader("⚖️ Bias Reduction Methods")
+if bias_reduction_method == "Reweighting":
+    st.write("🔹 **Reweighting Strategy**: Adjusts sample weights to balance fairness trade-offs.")
+    # Implement weight adjustment
+elif bias_reduction_method == "Exponentiated Gradient":
+    st.write("🔹 **Exponentiated Gradient**: Constrains model to satisfy fairness constraints.")
+    mitigator = ExponentiatedGradient(model, constraints=DemographicParity())
+    mitigator.fit(df[selected_feature], df["Prediction"])
+    df["Mitigated Prediction"] = mitigator.predict(df[selected_feature])
+    st.dataframe(df[["Prediction", "Mitigated Prediction"]])
 
-    st.write("""
-    Bias in machine learning models can be reduced using various techniques, each with **trade-offs**.
-    Below are different bias mitigation strategies that you can test on your dataset.
-    """)
+# === UX DESIGN & EXPLANATIONS ===
+st.header("🎨 UX Design Considerations")
+st.markdown("""
+- **Clarity**: Results are visualized using plots for better interpretation.
+- **Interactivity**: Users can explore different bias mitigation methods.
+- **Transparency**: SHAP analysis helps users understand how models make decisions.
+""")
 
-    bias_methods = {
-        "Reweighting": "Assign different weights to training samples based on underrepresented groups.",
-        "Fair Representations": "Learn a new representation of the data that removes sensitive attribute correlations.",
-        "Adversarial Debiasing": "Train a model with an adversary that learns to detect bias, forcing the main model to be unbiased.",
-        "Post-processing (Threshold Adjustment)": "Adjust prediction thresholds to enforce fairness constraints.",
-        "Fair Constraints (Demographic Parity)": "Apply constraints during training to enforce fairness across groups."
-    }
+st.header("🤖 AI Agent Explanation")
+if st.button("Ask AI for Explanation"):
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are an AI assistant helping analyze bias in AI models."},
+            {"role": "user", "content": f"Explain the bias analysis results: DP={dp_diff:.4f}, EO={eo_diff:.4f}"}
+        ]
+    )
+    st.write(response["choices"][0]["message"]["content"])
 
-    method_choice = st.selectbox("Choose a Bias Reduction Method", list(bias_methods.keys()))
-
-    st.write(f"### 🛠️ {method_choice}")
-    st.write(f"**How it works:** {bias_methods[method_choice]}")
-
-    if method_choice == "Reweighting":
-        st.write("This method re-weights the samples to balance the dataset.")
-        # Example implementation (pseudo)
-        df["weights"] = np.random.rand(len(df))  # Simulating new weights
-        st.dataframe(df.head(5))
-
-    elif method_choice == "Fair Representations":
-        st.write("Transforming data to remove correlations with protected attributes.")
-        # Example: Simulated transformed dataset
-        transformed_df = df.copy()
-        transformed_df[target_column] = np.random.permutation(transformed_df[target_column].values)
-        st.dataframe(transformed_df.head(5))
-
-    elif method_choice == "Adversarial Debiasing":
-        st.write("Training an adversarial network to remove bias during training.")
-        # Example: Simulated adversarial loss minimization
-        adversarial_loss = np.random.rand()
-        st.write(f"🔵 Adversarial Loss: {adversarial_loss:.4f}")
-
-    elif method_choice == "Post-processing (Threshold Adjustment)":
-        st.write("Adjusting decision thresholds for fairness.")
-        threshold = st.slider("Choose Threshold Adjustment", 0.1, 1.0, 0.5)
-        st.write(f"📊 Adjusted Threshold: {threshold}")
-
-    elif method_choice == "Fair Constraints (Demographic Parity)":
-        st.write("Applying demographic parity constraints.")
-        try:
-            constraints = DemographicParity()
-            exp_grad = ExponentiatedGradient(df[target_column], constraints)
-            model_fair = exp_grad.fit()
-            st.write("✅ Fair Model Trained with Constraints")
-        except Exception as e:
-            st.error(f"⚠️ Fair model training failed: {e}")
-
-    # === Show Trade-offs ===
-    st.subheader("⚖️ Trade-offs of Bias Reduction Methods")
-    st.write("""
-    Each bias mitigation method has **advantages and drawbacks**:
-    - **Reweighting**: ✅ Easy to implement, ❌ May overfit to small groups.
-    - **Fair Representations**: ✅ Works well with deep learning, ❌ May reduce overall accuracy.
-    - **Adversarial Debiasing**: ✅ Strong performance, ❌ Requires more computation.
-    - **Threshold Adjustment**: ✅ Simple, ❌ May require manual tuning.
-    - **Fair Constraints**: ✅ Enforces strict fairness, ❌ Can limit predictive power.
-    """)
-
-    # === REFRESH BUTTON ===
-    if st.button("🔄 Refresh App"):
-        st.cache_data.clear()
-        st.rerun()
+st.success("🎉 Analysis Complete!")
 
 # === FOOTER ===
 st.markdown(
