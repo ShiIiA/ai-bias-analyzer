@@ -12,8 +12,8 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import openai
-import shap
 import torch
+import shap
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -25,14 +25,14 @@ from PIL import Image
 from fairlearn.reductions import ExponentiatedGradient, DemographicParity
 from fairlearn.metrics import demographic_parity_difference, equalized_odds_difference
 
-# === SETUP CONFIGURATION ===
+# === CONFIGURATION ===
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
 # === FIX DEBERTA TOKENIZER ===
 try:
     tokenizer = AutoTokenizer.from_pretrained(
         "microsoft/deberta-v3-base",
-        use_fast=False,  # Enforce slow tokenizer to avoid conversion issue
+        use_fast=False,  # Ensure slow tokenizer is used
         trust_remote_code=True
     )
 except ValueError:
@@ -40,13 +40,14 @@ except ValueError:
 
 model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v3-base")
 
-# === LOAD EXPLANATION TOOL ===
-explainer = shap.Explainer(model)
+# === SHAP EXPLAINER FIX: USING A TEXT MASKER ===
+masker = shap.maskers.Text(tokenizer)
+explainer = shap.Explainer(model, masker=masker)
 
-# === LOAD SAMPLE DATA ===
+# === LOAD DATA ===
 @st.cache_data
 def load_data():
-    return pd.read_csv("sample_data.csv")  # Ensure the dataset is present
+    return pd.read_csv("sample_data.csv")  # Ensure dataset is available
 
 df = load_data()
 
@@ -87,8 +88,7 @@ st.header("🧐 Understanding Model Decisions")
 if st.button("Run SHAP Analysis"):
     st.write("Computing SHAP values...")
 
-    explainer = shap.Explainer(model, df[selected_feature])
-    shap_values = explainer(df[selected_feature])
+    shap_values = explainer(df[selected_feature].astype(str).tolist())
 
     fig, ax = plt.subplots(figsize=(10, 5))
     shap.summary_plot(shap_values, df[selected_feature], plot_type="bar", show=False)
