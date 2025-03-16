@@ -8,6 +8,7 @@ Original file is located at
 """
 
 import streamlit as st
+import pandas as pd
 import numpy as np
 import plotly.express as px
 import openai
@@ -23,71 +24,70 @@ import seaborn as sns
 # === SETUP CONFIGURATION ===
 st.set_page_config(page_title="AI Bias Analyzer", layout="wide")
 
-# === LOAD MODEL & TOKENIZER ===
+# === LOAD PRETRAINED MODEL ===
 MODEL_NAME = "microsoft/deberta-v3-base"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
 
-try:
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
-except Exception as e:
-    st.error(f"⚠️ Error loading AI model: {e}")
-    st.stop()
-
-# === SHAP EXPLAINER FIX: USING A TEXT MASKER ===
-try:
-    masker = shap.maskers.Text(tokenizer)
-    explainer = shap.Explainer(model, masker=masker)
-except Exception as e:
-    st.error(f"⚠️ Error initializing SHAP explainer: {e}")
-    st.stop()
+# === SHAP EXPLAINER SETUP ===
+masker = shap.maskers.Text(tokenizer)
+explainer = shap.Explainer(model, masker=masker)
 
 # === LOAD DATA ===
 uploaded_file = st.file_uploader("Upload a dataset", type=["csv"])
-
 if uploaded_file:
-    import pandas as pd
-
     df = pd.read_csv(uploaded_file)
-    st.write("📊 Dataset Preview:", df.head())
+    st.write("📊 Preview of your dataset:")
+    st.dataframe(df.head())
 
-    # Select columns
-    target_col = st.selectbox("Select target column", df.columns)
-    feature_cols = st.multiselect("Select feature columns", df.columns, default=df.columns.tolist())
+# === MODEL BIAS ANALYSIS ===
+st.header("🔍 Bias Analysis")
+target_column = st.selectbox("Select target variable:", df.columns if uploaded_file else [])
 
-    # === BIAS ANALYSIS ===
-    with st.expander("⚖️ Bias Analysis"):
-        sensitive_attr = st.selectbox("Select sensitive attribute", df.columns)
-        parity_diff = demographic_parity_difference(df[target_col], sensitive_features=df[sensitive_attr])
-        st.write(f"📉 Demographic Parity Difference: {parity_diff:.4f}")
+if uploaded_file and target_column:
+    # Compute Fairness Metrics
+    sensitive_attr = st.selectbox("Select sensitive attribute:", df.columns)
 
-    # === MODEL PREDICTIONS ===
-    if st.button("Run Predictions"):
-        inputs = tokenizer(df[feature_cols].astype(str).values.tolist(), padding=True, truncation=True, return_tensors="pt")
-        with torch.no_grad():
-            predictions = model(**inputs).logits.argmax(dim=-1).numpy()
-        df["Prediction"] = predictions
-        st.write("✅ Predictions Completed!")
+    demographic_parity = demographic_parity_difference(
+        df[target_column], df[sensitive_attr]
+    )
 
-        # Explain Predictions
-        with st.expander("🔍 SHAP Explanations"):
-            shap_values = explainer(df[feature_cols].astype(str).values.tolist())
-            st.pyplot(shap.plots.text(shap_values))
+    st.write(f"📢 **Demographic Parity Difference:** {demographic_parity:.4f}")
 
-    # === BIAS MITIGATION METHODS ===
-    with st.expander("⚖️ Bias Reduction Methods"):
-        st.write("Explore bias reduction techniques:")
-        st.markdown("- **Pre-processing**: Data balancing, re-weighting sensitive attributes")
-        st.markdown("- **In-processing**: Adversarial debiasing, fairness constraints")
-        st.markdown("- **Post-processing**: Calibration, fairness-aware thresholding")
+    # SHAP Interpretation
+    st.subheader("Explainability using SHAP")
+    sample_text = st.text_area("Enter a sample text for analysis:")
 
-        selected_method = st.selectbox("Select a bias mitigation method", ["None", "Reweighting", "Adversarial Training"])
-        if selected_method != "None":
-            st.write(f"Applying {selected_method}... 🚀")
-            # Implement methods here...
+    if sample_text:
+        tokens = tokenizer(sample_text, return_tensors="pt")
+        shap_values = explainer(tokens)
+
+        st.write("📊 SHAP Explanation for Prediction:")
+        shap.plots.text(shap_values)
+
+# === BIAS REDUCTION METHODS ===
+st.header("⚖️ Bias Reduction Techniques")
+
+bias_methods = {
+    "Reweighting": "Adjust sample weights to ensure fairness.",
+    "Adversarial Debiasing": "Train an adversarial model to reduce bias.",
+    "Post-Processing": "Modify predictions to achieve fairness.",
+}
+
+selected_method = st.selectbox("Choose a bias reduction technique:", list(bias_methods.keys()))
+
+st.write(f"💡 **Explanation:** {bias_methods[selected_method]}")
 
 # === UX DESIGN EXPLANATION ===
-with st.expander("🎨 UX Design & Model Transparency"):
-    st.write("This application follows transparency principles by providing clear explanations for model predictions.")
-    st.image("ux_design.png", caption="UX Flowchart", use_column_width=True)
+st.header("🎨 UX Design & Model Transparency")
 
+st.write(
+    """
+    - **Transparency**: This app highlights fairness metrics and model explanations.
+    - **User Control**: Select bias reduction techniques and interpret model outputs.
+    - **Visualizations**: Graphs and text-based explanations aid decision-making.
+    """
+)
+
+# === FINAL MESSAGE ===
 st.success("🎉 AI Bias Analyzer Ready!")
