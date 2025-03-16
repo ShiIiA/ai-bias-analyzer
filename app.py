@@ -20,6 +20,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from fairlearn.reductions import ExponentiatedGradient, DemographicParity
 from fairlearn.metrics import demographic_parity_difference
+from transformers import AutoTokenizer
+from transformers import AutoModelForSequenceClassification
+
+model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v3-base", ignore_mismatched_sizes=True)
+
+tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v3-base", use_fast=False)
+
 
 # === SETUP CONFIGURATION ===
 st.set_page_config(
