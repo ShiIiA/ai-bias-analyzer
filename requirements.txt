@@ -1,13 +1,27 @@
-streamlit==1.29.0  # Upgraded to support Pillow>=10
+# Streamlit for UI
+streamlit==1.29.0  # Ensure compatibility with Pillow >=10
+
+# Data Science and Visualization
 pandas==2.2.1
 numpy==1.26.4
+matplotlib==3.8.3  # Fix missing module error
+seaborn==0.13.2  # Ensure visualization compatibility
 plotly==6.0.0
-openai==1.11.0
+
+# Machine Learning & Transformers
+scikit-learn==1.4.1.post1
 shap==0.44.0
-fairlearn==0.10.0
-transformers==4.38.2
+transformers==4.38.2  # Ensure proper tokenizer imports
 torch==2.2.0  # Matches torch requirement for torchaudio and torchvision
 torchaudio==2.2.0
 torchvision==0.17.0
+
+# Fairness and Bias Detection
+fairlearn==0.10.0
+
+# Image Processing
 Pillow==10.1.0  # Matches scikit-image dependency
 scikit-image==0.25.2
+
+# OpenAI API
+openai==1.11.0
